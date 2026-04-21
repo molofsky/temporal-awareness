@@ -261,7 +261,196 @@ class ActivationPatching(Patching):
             __, self.corrupted_cache = self.model.run_with_cache(self.corrupted_tokens)
             self.caches_and_baselines_ready = True
 
-    def __patch__(self, layer_specific_algorithm):
+    def __precalculate_caches_and_baselines_unbatched__(self):
+        if not self.baselines_ready:
+            num_prompts = len(self.clean_tokens)
+
+            headers_to_dump = []
+            baselines_to_dump = []
+            if self.dump:
+                headers_to_dump = ["Pair ID", "Clean Q, Logit Diff",
+                                   "Clean Q, Logit clean", "Clean Q, Logprob clean",
+                                   "Clean Q, Logit corrupted", "Clean Q, Logprob corrupted",
+                                   "Corrupted Q, Logit Diff",                                       
+                                   "Corrupted Q, Logit clean", "Corrupted Q, Logprob clean",
+                                   "Corrupted Q, Logit corrupted", "Corrupted Q, Logprob corrupted"]
+                for i in range(0, num_prompts):
+                    baselines_to_dump.append([])
+
+            self.clean_logits_top_3 = []
+            self.corrupted_logits_top_3 = []
+
+            self.clean_q_clean_a_bsl = 0
+            self.clean_q_corrupted_a_bsl = 0
+            self.logit_diff_clean_q_clean_a_bsl = 0
+            self.logprob_clean_q_clean_a_bsl = 0
+            self.logprob_clean_q_corrupted_a_bsl = 0
+            self.logit_clean_q_clean_a_bsl = 0
+            self.logit_clean_q_corrupted_a_bsl = 0
+
+            for i in range(0, num_prompts):
+                clean_logits, clean_cache = self.model.run_with_cache(self.clean_tokens[i])
+                del clean_cache
+                gc.collect()
+                self.clean_logits_top_3.append(torch.sort(clean_logits[-1, -1, :], descending=True).indices[0:3])
+
+                if (self.technique_type == ActivationPatching.Technique.DENOISING_BOTH_LOGPROBS or
+                    self.technique_type == ActivationPatching.Technique.NOISING_BOTH_LOGPROBS or
+                    self.technique_type == ActivationPatching.Technique.DENOISING_BOTH_LOGPROBS_CUSTOM or
+                    self.technique_type == ActivationPatching.Technique.NOISING_BOTH_LOGPROBS_CUSTOM):
+                    clean_q_clean_a_bsl, clean_q_corrupted_a_bsl = self.inner_metric(clean_logits,
+                                                                                     self.clean_answer_ids[i],
+                                                                                     self.corrupted_answer_ids[i])
+                    self.clean_q_clean_a_bsl += clean_q_clean_a_bsl.item() / num_prompts
+                    self.clean_q_corrupted_a_bsl += clean_q_corrupted_a_bsl.item() / num_prompts
+                elif (self.technique_type == ActivationPatching.Technique.DENOISING_OPTIMAL or
+                      self.technique_type == ActivationPatching.Technique.NOISING_OPTIMAL):
+                    logit_diff = self.get_logit_diff_unbatched(clean_logits,
+                                                               self.clean_answer_ids[i],
+                                                               self.corrupted_answer_ids[i]).item()
+                    self.logit_diff_clean_q_clean_a_bsl +=  logit_diff / num_prompts
+                    logprob_clean_q_clean_a_bsl, logprob_clean_q_corrupted_a_bsl = self.get_both_logprobs_unbatched(clean_logits,
+                                                                                                                    self.clean_answer_ids[i],
+                                                                                                                    self.corrupted_answer_ids[i])
+                    self.logprob_clean_q_clean_a_bsl += logprob_clean_q_clean_a_bsl.item() / num_prompts
+                    self.logprob_clean_q_corrupted_a_bsl += logprob_clean_q_corrupted_a_bsl.item() / num_prompts
+                    logit_clean_q_clean_a_bsl, logit_clean_q_corrupted_a_bsl = self.get_both_logits_unbatched(clean_logits,
+                                                                                                              self.clean_answer_ids[i],
+                                                                                                              self.corrupted_answer_ids[i])
+                    self.logit_clean_q_clean_a_bsl += logit_clean_q_clean_a_bsl.item() / num_prompts
+                    self.logit_clean_q_corrupted_a_bsl += logit_clean_q_corrupted_a_bsl.item() / num_prompts
+
+                    if self.dump:
+                        baselines_to_dump[i].extend([self.pairs_ids[i], logit_diff,
+                                                     logit_clean_q_clean_a_bsl.item(), logprob_clean_q_clean_a_bsl.item(),
+                                                     logit_clean_q_corrupted_a_bsl.item(), logprob_clean_q_corrupted_a_bsl.item()])
+                else:
+                    self.clean_q_clean_a_bsl += self.inner_metric(clean_logits,
+                                                                  self.clean_answer_ids[i],
+                                                                  self.corrupted_answer_ids[i]).item() / num_prompts
+            gc.collect()
+
+            self.corrupted_q_clean_a_bsl = 0
+            self.corrupted_q_corrupted_a_bsl = 0
+            self.logit_diff_corrupted_q_clean_a_bsl = 0
+            self.logprob_corrupted_q_clean_a_bsl = 0
+            self.logprob_corrupted_q_corrupted_a_bsl = 0
+            self.logit_corrupted_q_clean_a_bsl = 0
+            self.logit_corrupted_q_corrupted_a_bsl = 0
+
+            for i in range(0, num_prompts):
+                corrupted_logits, corrupted_cache = self.model.run_with_cache(self.corrupted_tokens[i])
+                del corrupted_cache
+                gc.collect()
+                self.corrupted_logits_top_3.append(torch.sort(corrupted_logits[-1, -1, :], descending=True).indices[0:3])
+
+                if (self.technique_type == ActivationPatching.Technique.DENOISING_BOTH_LOGPROBS or
+                    self.technique_type == ActivationPatching.Technique.NOISING_BOTH_LOGPROBS or 
+                    self.technique_type == ActivationPatching.Technique.DENOISING_BOTH_LOGPROBS_CUSTOM or
+                    self.technique_type == ActivationPatching.Technique.NOISING_BOTH_LOGPROBS_CUSTOM):
+                    corrupted_q_clean_a_bsl, corrupted_q_corrupted_a_bsl = self.inner_metric(corrupted_logits,
+                                                                                             self.clean_answer_ids[i],
+                                                                                             self.corrupted_answer_ids[i])
+                    self.corrupted_q_clean_a_bsl += corrupted_q_clean_a_bsl.item() / num_prompts
+                    self.corrupted_q_corrupted_a_bsl += corrupted_q_corrupted_a_bsl.item() / num_prompts
+                elif (self.technique_type == ActivationPatching.Technique.DENOISING_OPTIMAL or
+                      self.technique_type == ActivationPatching.Technique.NOISING_OPTIMAL):
+                    logit_diff = self.get_logit_diff_unbatched(corrupted_logits,
+                                                               self.clean_answer_ids[i],
+                                                               self.corrupted_answer_ids[i]).item()
+                    self.logit_diff_corrupted_q_clean_a_bsl += logit_diff / num_prompts
+                    logprob_corrupted_q_clean_a_bsl, logprob_corrupted_q_corrupted_a_bsl = self.get_both_logprobs_unbatched(corrupted_logits,
+                                                                                                                            self.clean_answer_ids[i],
+                                                                                                                            self.corrupted_answer_ids[i])
+                    self.logprob_corrupted_q_clean_a_bsl += logprob_corrupted_q_clean_a_bsl.item() / num_prompts
+                    self.logprob_corrupted_q_corrupted_a_bsl += logprob_corrupted_q_corrupted_a_bsl.item() / num_prompts
+                    logit_corrupted_q_clean_a_bsl, logit_corrupted_q_corrupted_a_bsl = self.get_both_logits_unbatched(corrupted_logits,
+                                                                                                                      self.clean_answer_ids[i],
+                                                                                                                      self.corrupted_answer_ids[i])
+                    self.logit_corrupted_q_clean_a_bsl += logit_corrupted_q_clean_a_bsl.item() / num_prompts
+                    self.logit_corrupted_q_corrupted_a_bsl += logit_corrupted_q_corrupted_a_bsl.item() / num_prompts
+
+                    if self.dump:
+                        baselines_to_dump[i].extend([logit_diff,
+                                                     logit_corrupted_q_clean_a_bsl.item(), logprob_corrupted_q_clean_a_bsl.item(),
+                                                     logit_corrupted_q_corrupted_a_bsl.item(), logprob_corrupted_q_corrupted_a_bsl.item()])
+                else:      
+                    self.corrupted_q_clean_a_bsl += self.inner_metric(corrupted_logits,
+                                                                      self.clean_answer_ids[i],
+                                                                      self.corrupted_answer_ids[i]).item() / num_prompts
+            gc.collect()
+
+
+            if self.dump and not self.baselines_ready:
+                df_to_dump = pd.DataFrame(baselines_to_dump, columns=headers_to_dump)
+                df_to_dump.to_csv("computed_baselines.csv")
+                print("Dumped baseline metrics into \"computed_baselines.csv\"!")
+            self.baselines_ready = True
+
+        clean_tokens_top3 = self.model.to_string(torch.stack(self.clean_logits_top_3))
+        clean_tokens_top3 = {self.pairs_ids[id] : value for id, value in enumerate(clean_tokens_top3)}
+        corrupted_tokens_top3 = self.model.to_string(torch.stack(self.corrupted_logits_top_3))
+        corrupted_tokens_top3 = {self.pairs_ids[id] : value for id, value in enumerate(corrupted_tokens_top3)}
+        print(f"Clean logit TOP-3: {clean_tokens_top3}")
+        print()
+        print(f"Corrupted logit TOP-3: {corrupted_tokens_top3}")
+        print()
+        print()
+
+        if (self.technique_type == ActivationPatching.Technique.DENOISING_BOTH_LOGPROBS or
+            self.technique_type == ActivationPatching.Technique.NOISING_BOTH_LOGPROBS or
+            self.technique_type == ActivationPatching.Technique.DENOISING_BOTH_LOGPROBS_CUSTOM or
+            self.technique_type == ActivationPatching.Technique.NOISING_BOTH_LOGPROBS_CUSTOM):
+            print(f"Clean(clean) baseline metric: {self.clean_q_clean_a_bsl:.4f}")
+            print(f"Corrupted(clean) baseline metric: {self.corrupted_q_clean_a_bsl:.4f}")
+            print(f"Clean(corrupted) baseline metric: {self.clean_q_corrupted_a_bsl:.4f}")
+            print(f"Corrupted(corrupted) baseline metric: {self.corrupted_q_corrupted_a_bsl:.4f}")
+        elif (self.technique_type == ActivationPatching.Technique.DENOISING_OPTIMAL or
+              self.technique_type == ActivationPatching.Technique.NOISING_OPTIMAL):
+            print(f"Logit_diff clean baseline metric: {self.logit_diff_clean_q_clean_a_bsl:.4f}")
+            print(f"Logit_diff corrupted baseline metric: {self.logit_diff_corrupted_q_clean_a_bsl:.4f}")
+            print()
+            print(f"Logprob clean answer(clean prompt) baseline metric: {self.logprob_clean_q_clean_a_bsl:.4f}")
+            print(f"Logprob corrupted answer(clean prompt) baseline metric: {self.logprob_clean_q_corrupted_a_bsl:.4f}")
+            print(f"Logprob clean answer(corrupted prompt) baseline metric: {self.logprob_corrupted_q_clean_a_bsl:.4f}")
+            print(f"Logprob corrupted answer(corrupted prompt) baseline metric: {self.logprob_corrupted_q_corrupted_a_bsl:.4f}")
+            print()
+            print(f"Logit clean answer(clean prompt) baseline metric: {self.logit_clean_q_clean_a_bsl:.4f}")
+            print(f"Logit corrupted answer(clean prompt) baseline metric: {self.logit_clean_q_corrupted_a_bsl:.4f}")
+            print(f"Logit clean answer(corrupted prompt) baseline metric: {self.logit_corrupted_q_clean_a_bsl:.4f}")
+            print(f"Logit corrupted answer(corrupted prompt) baseline metric: {self.logit_corrupted_q_corrupted_a_bsl:.4f}")
+        else:
+            print(f"Clean baseline metric: {self.clean_q_clean_a_bsl:.4f}")
+            print(f"Corrupted baseline metric: {self.corrupted_q_clean_a_bsl:.4f}")
+
+        assert not self.caches_and_baselines_ready
+
+    # Helper for call of ActivationPatching wih custom metrics.
+    def __create_indices__(self, activation_name, index_axis_names, tokens_to_run):
+        assert index_axis_names is not None
+
+        number_of_heads = self.model.cfg.n_heads
+        # For some models, the number of key value heads is not the same as the number of attention heads
+        if activation_name in ["k", "v"] and self.model.cfg.n_key_value_heads is not None:
+            number_of_heads = self.model.cfg.n_key_value_heads
+
+        # Get the max range for all possible axes
+        max_axis_range = {
+            "layer": self.model.cfg.n_layers,
+            "pos": tokens_to_run.shape[-1],
+            "head_index": number_of_heads,
+        }
+        max_axis_range["src_pos"] = max_axis_range["pos"]
+        max_axis_range["dest_pos"] = max_axis_range["pos"]
+        max_axis_range["head"] = max_axis_range["head_index"]
+
+        # Get the max range for each axis we iterate over
+        index_axis_max_range = [max_axis_range[axis_name] for axis_name in index_axis_names]
+
+        # Get the dataframe where each row is a tuple of indices
+        return index_axis_max_range
+
+    def __patch__(self, layer_specific_algorithm, activation_name="", index_axis_names=""):
         # Precalculate caches and baselines if not yet:
         self.__precalculate_caches_and_baselines__()
         assert(self.caches_and_baselines_ready)
