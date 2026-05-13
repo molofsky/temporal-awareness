@@ -158,7 +158,7 @@ class ActivationPatching(Patching):
         self.viz_type = viz_type
         self.unbatched = unbatched
         self.pairs_ids = pairs_ids
-        if self.pairs_ids == None:
+        if self.pairs_ids is None:
             self.pairs_ids = [i for i in range(0, len(clean_prompts))]
         self.dump = dump
 
@@ -415,7 +415,7 @@ class ActivationPatching(Patching):
                 headers_to_dump = ["Pair ID", "Clean Q, Logit Diff",
                                    "Clean Q, Logit clean", "Clean Q, Logprob clean",
                                    "Clean Q, Logit corrupted", "Clean Q, Logprob corrupted",
-                                   "Corrupted Q, Logit Diff",                                       
+                                   "Corrupted Q, Logit Diff",
                                    "Corrupted Q, Logit clean", "Corrupted Q, Logprob clean",
                                    "Corrupted Q, Logit corrupted", "Corrupted Q, Logprob corrupted"]
                 for i in range(0, num_prompts):
@@ -489,7 +489,7 @@ class ActivationPatching(Patching):
                 self.corrupted_logits_top_3.append(torch.sort(corrupted_logits[-1, -1, :], descending=True).indices[0:3])
 
                 if (self.technique_type == ActivationPatching.Technique.DENOISING_BOTH_LOGPROBS or
-                    self.technique_type == ActivationPatching.Technique.NOISING_BOTH_LOGPROBS or 
+                    self.technique_type == ActivationPatching.Technique.NOISING_BOTH_LOGPROBS or
                     self.technique_type == ActivationPatching.Technique.DENOISING_BOTH_LOGPROBS_CUSTOM or
                     self.technique_type == ActivationPatching.Technique.NOISING_BOTH_LOGPROBS_CUSTOM):
                     corrupted_q_clean_a_bsl, corrupted_q_corrupted_a_bsl = self.inner_metric(corrupted_logits,
@@ -518,7 +518,7 @@ class ActivationPatching(Patching):
                         baselines_to_dump[i].extend([logit_diff,
                                                      logit_corrupted_q_clean_a_bsl.item(), logprob_corrupted_q_clean_a_bsl.item(),
                                                      logit_corrupted_q_corrupted_a_bsl.item(), logprob_corrupted_q_corrupted_a_bsl.item()])
-                else:      
+                else:
                     self.corrupted_q_clean_a_bsl += self.inner_metric(corrupted_logits,
                                                                       self.clean_answer_ids[i],
                                                                       self.corrupted_answer_ids[i]).item() / num_prompts
@@ -806,14 +806,14 @@ class ActivationPatching(Patching):
                 # Ex: For (layer, pos) index_axis_max_range is [model.cfg.n_layers, tokens_to_run.shape[-1]]
                 patched_metrics_output = [torch.zeros(index_axis_max_range, device=self.model.cfg.device) \
                                         for i in range(0, len(first_layer_metrics))]
-    
+
                 for i in range(0, len(first_layer_metrics)):
                     for c, index_row in enumerate(list(index_df.iterrows())):
                         index = index_row[1].to_list()
                         patched_metrics_output[i][tuple(index)] = metrics_output[c][i]
                 return torch.stack(patched_metrics_output)
             else:
-                print(f"Launching DENOISING_OPTIMAL!")
+                print("Launching DENOISING_OPTIMAL!")
 
                 dump_folder = ""
                 if self.dump:
@@ -924,7 +924,7 @@ class ActivationPatching(Patching):
 
                 return torch.stack(patched_metrics_output)
             else:
-                print(f"Launching NOISING_OPTIMAL!")
+                print("Launching NOISING_OPTIMAL!")
 
                 dump_folder = ""
                 if self.dump:
